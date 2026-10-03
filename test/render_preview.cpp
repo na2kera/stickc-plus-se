@@ -44,6 +44,15 @@ int main() {
       auto& best = app.records.best[app.records.index(app.game, app.mode)]; best = {true, app.result.score};
       capture(canvas, app, 0, "large-result");
     }
+    app.game = Game::Flight; app.screen = Screen::Play; app.flight.enter(0);
+    app.flight.elapsedMs = 60000; app.flight.spawn(app.random);
+    app.flight.obstacles[0].x = 90; app.flight.spawn(app.random); app.flight.obstacles[1].x = 210;
+    capture(canvas, app, 60000, "flight-lv7");
+    app.screen = Screen::Result; app.result = {}; app.result.mode = Mode::Voice;
+    app.result.score = 1200; app.records.best[3] = {true, 1200}; app.mode = Mode::Voice;
+    capture(canvas, app, 0, "flight-long-result");
+    app.result.score = UINT32_MAX / 100; app.records.best[3] = {true, app.result.score};
+    capture(canvas, app, 0, "flight-max-result");
     std::printf("PASS: %u render previews; Japanese font bounds checked\n", frames);
   } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }

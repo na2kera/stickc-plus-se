@@ -108,15 +108,16 @@ void gameRender(lgfx::LGFXBase& c, const App& app, uint32_t now) {
     }
     case Game::Flight: {
       const auto& f = app.flight;
-      std::snprintf(buffer, sizeof(buffer), "%lu.%lu秒  %s", static_cast<unsigned long>(f.elapsedMs / 1000), static_cast<unsigned long>(f.elapsedMs / 100 % 10), app.mode == Mode::Voice ? "声" : "ボタン"); text(c, buffer, 6, 4);
+      std::snprintf(buffer, sizeof(buffer), "%lu.%lu秒", static_cast<unsigned long>(f.elapsedMs / 1000), static_cast<unsigned long>(f.elapsedMs / 100 % 10)); text(c, buffer, 6, 4);
       c.drawRect(170, 7, 62, 10, muted); c.fillRect(172, 9, int(f.level * 58), 6, mint);
       for (const auto& o : f.obstacles) if (o.active) {
-        int x = int(o.x), upper = int(o.center - cfg::gapHeight / 2), lower = int(o.center + cfg::gapHeight / 2);
+        int x = int(o.x), upper = int(o.center - o.gap / 2), lower = int(o.center + o.gap / 2);
         c.fillRect(x, cfg::fieldTop, int(cfg::obstacleWidth), upper - cfg::fieldTop, mint);
         c.fillRect(x, lower, int(cfg::obstacleWidth), cfg::fieldBottom - lower, mint);
       }
       c.drawLine(0, cfg::fieldTop, 239, cfg::fieldTop, muted); c.drawLine(0, cfg::fieldBottom, 239, cfg::fieldBottom, muted);
       c.fillEllipse(int(cfg::flightX), int(f.y - 2), 9, 8, sky); c.fillRect(int(cfg::flightX) - 4, int(f.y) + 6, 8, 4, yellow);
+      std::snprintf(buffer, sizeof(buffer), "Lv%u  A+B 長押しで中断", f.difficulty() + 1); footer(c, buffer);
       break;
     }
     case Game::Clock: {
@@ -160,7 +161,7 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
     case Screen::Instructions: {
       text(c, names[unsigned(app.game)], 8, 3, yellow, true);
       const char* first[5] = {"球が線に来たらA!", "Aでふくらませる", "A/Bの順番を覚える", "声で高さを変える", "10秒を感じて止める"};
-      const char* second[5] = {"10球の合計で勝負", "Bで割れる前に確定", "同じ順番で短く押す", "20秒よけ続けよう", "途中で時計が隠れる"};
+      const char* second[5] = {"10球の合計で勝負", "Bで割れる前に確定", "同じ順番で短く押す", "よけ続けて記録更新!", "途中で時計が隠れる"};
       text(c, app.game == Game::Flight && app.mode == Mode::Button ? "A保持で上昇" : first[unsigned(app.game)], 8, 37);
       text(c, second[unsigned(app.game)], 8, 60); icon(c, app.game, 194, 84);
       footer(c, "A:開始 B:戻る"); break;
@@ -177,8 +178,8 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
         std::snprintf(buffer, sizeof(buffer), "%lu.%02lu", static_cast<unsigned long>(r.elapsedMs / 1000), static_cast<unsigned long>(r.elapsedMs % 1000 / 10)); number(c, buffer, 8, 33); text(c, "秒", 130, 39);
         std::snprintf(buffer, sizeof(buffer), "誤差 %lu ms", static_cast<unsigned long>(r.score)); text(c, buffer, 8, 66);
       } else if (app.game == Game::Flight) {
-        std::snprintf(buffer, sizeof(buffer), "%lu.%lu", static_cast<unsigned long>(r.score / 10), static_cast<unsigned long>(r.score % 10)); number(c, buffer, 8, 38, yellow, 1.5f);
-        text(c, r.mode == Mode::Voice ? "秒 / 音声" : "秒 / ボタン", 109, 50);
+        std::snprintf(buffer, sizeof(buffer), "%lu.%lu", static_cast<unsigned long>(r.score / 10), static_cast<unsigned long>(r.score % 10)); number(c, buffer, 8, 33, yellow, r.score < 100000 ? 1.5f : 1.f);
+        text(c, r.mode == Mode::Voice ? "秒 / 音声" : "秒 / ボタン", 8, 70);
       } else { std::snprintf(buffer, sizeof(buffer), "%lu", static_cast<unsigned long>(r.score)); number(c, buffer, 8, 36, yellow, 1.5f); text(c, app.game == Game::Memory ? "個 正解" : "点", 120, 53); }
       bestLabel(c, app, 91); footer(c, "A:再挑戦 B:選択へ"); break;
     }

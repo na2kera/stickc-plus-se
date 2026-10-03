@@ -101,12 +101,17 @@ struct Clock {
   bool update(uint32_t now, const InputFrame& input);
   uint32_t error() const { return elapsedMs > 10000 ? elapsedMs - 10000 : 10000 - elapsedMs; }
 };
-struct Obstacle { float x = 0, center = 0; bool active = false; };
+struct Obstacle { float x = 0, center = 0; bool active = false; float gap = cfg::gapHeight; };
 struct Flight {
   std::array<Obstacle, 4> obstacles{};
   float y = (cfg::fieldTop + cfg::fieldBottom) * .5f, lastCenter = y, level = 0;
   uint32_t startedAt = 0, updatedAt = 0, nextSpawn = cfg::obstacleIntervalMs, elapsedMs = 0;
   bool collision = false;
+  bool nextHigh = false;
+  unsigned difficulty() const;
+  float speed() const;
+  float gap() const;
+  uint32_t spawnInterval() const;
   void enter(uint32_t now);
   void spawn(Random& random);
   static bool hits(float y, const Obstacle& obstacle);

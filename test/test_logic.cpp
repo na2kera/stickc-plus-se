@@ -1,4 +1,5 @@
 #include "model.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -149,12 +150,47 @@ static void testFlight() {
   f.enter(0); f.update(1000, 1, random); CHECK(f.y == cfg::fieldTop + 10);
   f.update(2000, 0, random); CHECK(f.y <= cfg::fieldBottom - 10);
   f.enter(0); f.y = cfg::fieldTop + 10; f.obstacles[0] = {100, 75, true}; CHECK(f.update(2000, .45f, random)); CHECK(f.collision && f.elapsedMs < 2000);
-  f.enter(UINT32_MAX - 100); CHECK(f.update(f.startedAt + 20000, .45f, random)); CHECK(!f.collision && f.elapsedMs == 20000);
-  float previous = f.lastCenter;
-  for (unsigned n = 0; n < 100; ++n) {
-    for (auto& o : f.obstacles) o.active = false;
-    f.spawn(random); CHECK(std::abs(f.lastCenter - previous) <= 25); previous = f.lastCenter;
-    CHECK(f.lastCenter >= cfg::fieldTop + 35 && f.lastCenter <= cfg::fieldBottom - 35);
+  // A fixed central altitude can no longer survive the whole run.
+  f.enter(0); CHECK(f.update(90000, .45f, random)); CHECK(f.collision);
+  const auto ended = f.elapsedMs; CHECK(f.update(90010, 1, random)); CHECK(f.elapsedMs == ended);
+  for (unsigned stage = 0; stage <= cfg::flightMaxStage; ++stage) {
+    f.enter(0); f.elapsedMs = stage * cfg::flightDifficultyMs;
+    float previous = f.lastCenter;
+    for (unsigned n = 0; n < 100; ++n) {
+      for (auto& o : f.obstacles) o.active = false;
+      f.spawn(random);
+      CHECK(std::abs(f.lastCenter - previous) <= cfg::flightCenterStep + .001f);
+      CHECK(f.lastCenter >= cfg::fieldTop + f.gap() / 2 && f.lastCenter <= cfg::fieldBottom - f.gap() / 2);
+      if (n) CHECK(std::abs(f.lastCenter - previous) >= 19.f - .001f);
+      previous = f.lastCenter;
+    }
+  }
+  f.enter(0); const float initialSpeed = f.speed(), initialGap = f.gap();
+  const auto initialInterval = f.spawnInterval(); f.elapsedMs = 10000;
+  CHECK(f.speed() > initialSpeed && f.gap() < initialGap && f.spawnInterval() < initialInterval);
+  f.elapsedMs = 60000; const float maxSpeed = f.speed(), minGap = f.gap();
+  f.elapsedMs = 120000; CHECK(f.speed() == maxSpeed && f.gap() == minGap);
+  CHECK(minGap > 2 * cfg::flightRadius);
+  // A newly generated narrower opening must not resize an existing obstacle.
+  f.enter(0); f.spawn(random); f.elapsedMs = 60000;
+  CHECK(f.obstacles[0].gap == initialGap && f.obstacles[0].gap > f.gap());
+  // Follow the next opening with bounded ascent/descent, including millis wrap.
+  // The controller waits until the preceding bar has cleared the balloon.
+  for (unsigned seed = 1; seed <= 20; ++seed) {
+    Random route(seed); f.enter(UINT32_MAX - 100);
+    for (uint32_t elapsed = 20; elapsed <= 120000; elapsed += 20) {
+      const Obstacle* next = nullptr;
+      for (const auto& o : f.obstacles) if (o.active && o.x + cfg::obstacleWidth >= cfg::flightX - cfg::flightRadius) {
+        if (!next || o.x < next->x) next = &o;
+      }
+      const float target = next ? next->center : f.y;
+      const float input = std::max(0.f, std::min(1.f, .45f + (f.y - target) * .1f));
+      CHECK(!f.update(f.startedAt + elapsed, input, route));
+      if (elapsed == 20000) CHECK(!f.collision && f.elapsedMs == 20000);
+      unsigned active = 0; for (const auto& o : f.obstacles) if (o.active) ++active;
+      CHECK(active < f.obstacles.size());
+    }
+    CHECK(f.elapsedMs == 120000 && !f.collision);
   }
 }
 static void testMicAndRecords() {
@@ -172,7 +208,9 @@ static void testMicAndRecords() {
   CHECK(!r.submit(Game::Clock, Mode::Voice, 1)); CHECK(!r.submit(Game::Clock, Mode::Voice, 0));
   CHECK(r.submit(Game::Flight, Mode::Voice, 100)); CHECK(r.submit(Game::Flight, Mode::Button, 20));
   CHECK(r.best[3].value == 100 && r.best[4].value == 20);
-  auto bytes = encode(r); Records roundTrip; CHECK(decode(bytes, roundTrip)); CHECK(roundTrip.best[5].valid && roundTrip.best[5].value == 0);
+  Records legacy; CHECK(decode(encode(r), legacy)); CHECK(legacy.best[3].value == 100);
+  CHECK(r.submit(Game::Flight, Mode::Voice, 1200)); CHECK(r.valid());
+  auto bytes = encode(r); Records roundTrip; CHECK(decode(bytes, roundTrip)); CHECK(roundTrip.best[5].valid && roundTrip.best[5].value == 0); CHECK(roundTrip.best[3].value == 1200);
   for (unsigned n = 0; n < bytes.size(); ++n) { auto corrupted = bytes; corrupted[n] ^= 1; CHECK(!decode(corrupted, roundTrip)); CHECK(!roundTrip.best[5].valid); }
   auto invalid = r; invalid.settings.brightness = 3; CHECK(!decode(encode(invalid), roundTrip));
   invalid = r; invalid.best[0] = {true, 1001}; CHECK(!decode(encode(invalid), roundTrip));
@@ -202,6 +240,10 @@ static void testApp() {
     app.update(endedAt + 1502, {}); CHECK(app.screen == Screen::Play);
     InputFrame abort; abort.abort = true; app.update(endedAt + 1503, abort); CHECK(app.screen == Screen::Menu); CHECK(!app.takeStorageDirty());
   }
+  App longRun; longRun.game = Game::Flight; longRun.mode = Mode::Button; longRun.screen = Screen::Play;
+  longRun.flight.enter(0); longRun.flight.elapsedMs = longRun.flight.updatedAt = 120000; longRun.flight.collision = true;
+  longRun.update(120001, {}); CHECK(longRun.screen == Screen::Result && longRun.result.score == 1200);
+  Records saved; CHECK(decode(encode(longRun.records), saved)); CHECK(saved.best[4].value == 1200);
   App app; select(app, Game::Clock, Mode::Button);
   auto hold = pressA(1500); app.update(1504, hold); CHECK(app.screen == Screen::Play);
   app.update(1505, hold); CHECK(app.clock.phase == Clock::Phase::Ready); app.update(1510, {});

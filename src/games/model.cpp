@@ -3,7 +3,7 @@
 namespace mini {
 bool Records::valid() const {
   if (settings.brightness > 2 || uint8_t(settings.mode) > 1) return false;
-  constexpr uint32_t maximum[6] = {1000, 230, 12, 200, 200, 10000};
+  constexpr uint32_t maximum[6] = {1000, 230, 12, UINT32_MAX / 100, UINT32_MAX / 100, 10000};
   for (size_t i = 0; i < best.size(); ++i) {
     if (best[i].value > maximum[i] || (!best[i].valid && best[i].value)) return false;
   }
@@ -140,30 +140,41 @@ bool Clock::update(uint32_t now, const InputFrame& input) {
   return false;
 }
 void Flight::enter(uint32_t now) { *this = {}; startedAt = updatedAt = now; }
+unsigned Flight::difficulty() const { return std::min(unsigned(elapsedMs / cfg::flightDifficultyMs), cfg::flightMaxStage); }
+float Flight::speed() const { return cfg::obstacleSpeed + 10.f * difficulty(); }
+float Flight::gap() const { return cfg::gapHeight - 3.f * difficulty(); }
+uint32_t Flight::spawnInterval() const { return cfg::obstacleIntervalMs - 100 * difficulty(); }
 void Flight::spawn(Random& random) {
-  const float low = cfg::fieldTop + cfg::gapHeight * .5f, high = cfg::fieldBottom - cfg::gapHeight * .5f;
-  lastCenter = std::max(low, std::min(high, lastCenter + float(int(random.range(0, 50)) - 25)));
-  for (auto& obstacle : obstacles) if (!obstacle.active) { obstacle = {float(cfg::width), lastCenter, true}; break; }
+  const float opening = gap();
+  const float low = cfg::fieldTop + opening * .5f, high = cfg::fieldBottom - opening * .5f;
+  // Alternate upper/lower routes, with jitter and a reachable change in height.
+  const float target = nextHigh ? high - float(random.range(0, 3)) : low + float(random.range(0, 3));
+  const float center = std::max(low, std::min(high, std::max(lastCenter - cfg::flightCenterStep, std::min(lastCenter + cfg::flightCenterStep, target))));
+  for (auto& obstacle : obstacles) if (!obstacle.active) {
+    obstacle = {float(cfg::width), center, true, opening};
+    lastCenter = center; nextHigh = !nextHigh; break;
+  }
 }
 bool Flight::hits(float y, const Obstacle& o) {
   return o.active && o.x < cfg::flightX + cfg::flightRadius && o.x + cfg::obstacleWidth > cfg::flightX - cfg::flightRadius
-    && (y - cfg::flightRadius < o.center - cfg::gapHeight * .5f || y + cfg::flightRadius > o.center + cfg::gapHeight * .5f);
+    && (y - cfg::flightRadius < o.center - o.gap * .5f || y + cfg::flightRadius > o.center + o.gap * .5f);
 }
 bool Flight::update(uint32_t now, float inputLevel, Random& random) {
   level = std::max(0.f, std::min(1.f, inputLevel));
+  if (collision) return true;
   // Integrate in <=10ms steps: collision cannot tunnel through a bar on a slow frame.
-  uint32_t remaining = std::min(uint32_t(now - updatedAt), cfg::flightMs - elapsedMs);
+  uint32_t remaining = uint32_t(now - updatedAt);
   while (remaining) {
     const uint32_t step = std::min(remaining, uint32_t(10)); remaining -= step;
     elapsedMs += step; updatedAt += step;
     y = std::max(cfg::fieldTop + 10.f, std::min(cfg::fieldBottom - 10.f, y + (45.f - 100.f * level) * (step * .001f)));
-    if (elapsedMs >= nextSpawn) { spawn(random); nextSpawn += cfg::obstacleIntervalMs; }
+    if (elapsedMs >= nextSpawn) { spawn(random); nextSpawn += spawnInterval(); }
     for (auto& o : obstacles) if (o.active) {
-      o.x -= cfg::obstacleSpeed * (step * .001f);
+      o.x -= speed() * (step * .001f);
       if (hits(y, o)) { collision = true; return true; }
       if (o.x + cfg::obstacleWidth < 0) o.active = false;
     }
   }
-  return elapsedMs >= cfg::flightMs;
+  return false;
 }
 }
