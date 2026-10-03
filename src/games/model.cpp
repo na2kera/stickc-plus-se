@@ -47,8 +47,13 @@ float rmsWithoutDC(const int16_t* samples, size_t count) {
   const double mean = sum / count;
   return float(std::sqrt(std::max(0., square / count - mean * mean)));
 }
+unsigned Baseball::difficulty() const { return ball <= 3 ? 0 : ball <= 6 ? 1 : ball <= 9 ? 2 : 3; }
 void Baseball::pitch(uint32_t now, Random& random) {
-  pitchAt = now; waitMs = random.range(500, 900); travelMs = random.range(700, 1100); feedback = false;
+  const auto& timing = cfg::baseballTiming[difficulty()];
+  pitchAt = now;
+  waitMs = random.range(timing.waitMinMs, timing.waitMaxMs);
+  travelMs = random.range(timing.travelMinMs, timing.travelMaxMs);
+  feedback = false;
 }
 unsigned Baseball::points(int32_t delta) {
   const uint32_t error = delta < 0 ? uint32_t(-int64_t(delta)) : uint32_t(delta);

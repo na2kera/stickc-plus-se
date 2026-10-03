@@ -62,7 +62,7 @@ void gameRender(lgfx::LGFXBase& c, const App& app, uint32_t now) {
   switch (app.game) {
     case Game::Baseball: {
       const auto& b = app.baseball;
-      std::snprintf(buffer, sizeof(buffer), "%u/10球   %u点", b.ball, b.score); text(c, buffer, 8, 4);
+      std::snprintf(buffer, sizeof(buffer), "%u/10球 %u点 Lv%u", b.ball, b.score, b.difficulty() + 1); text(c, buffer, 8, 4);
       c.fillCircle(24, 59, 8, sky); c.fillRect(20, 68, 8, 24, sky);
       c.drawLine(24, 87, 12, 107, sky); c.drawLine(24, 87, 34, 107, sky);
       c.fillRoundRect(45, 61, 7, 40, 3, yellow); c.drawLine(51, 36, 51, 110, muted);
@@ -161,7 +161,7 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
     case Screen::Instructions: {
       text(c, names[unsigned(app.game)], 8, 3, yellow, true);
       const char* first[5] = {"球が線に来たらA!", "Aでふくらませる", "A/Bの順番を覚える", "声で高さを変える", "10秒を感じて止める"};
-      const char* second[5] = {"10球の合計で勝負", "Bで割れる前に確定", "同じ順番で短く押す", "よけ続けて記録更新!", "途中で時計が隠れる"};
+      const char* second[5] = {"10球・後半ほど速い", "Bで割れる前に確定", "同じ順番で短く押す", "よけ続けて記録更新!", "途中で時計が隠れる"};
       text(c, app.game == Game::Flight && app.mode == Mode::Button ? "A保持で上昇" : first[unsigned(app.game)], 8, 37);
       text(c, second[unsigned(app.game)], 8, 60); icon(c, app.game, 194, 84);
       footer(c, "A:開始 B:戻る"); break;
