@@ -73,6 +73,7 @@ struct Baseball {
   uint32_t pitchAt = 0, waitMs = 0, travelMs = 0, feedbackAt = 0;
   unsigned ball = 1, score = 0, lastPoints = 0;
   bool feedback = false;
+  unsigned difficulty() const;
   void pitch(uint32_t now, Random& random);
   static unsigned points(int32_t delta);
   bool update(uint32_t now, const InputFrame& input, Random& random);

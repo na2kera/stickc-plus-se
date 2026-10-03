@@ -20,7 +20,9 @@ int main() {
     for (unsigned n = 0; n < 6; ++n) { app.selection = n; capture(canvas, app, 0, "menu"); }
     for (unsigned n = 0; n < 5; ++n) {
       app.game = Game(n); app.screen = Screen::Instructions; capture(canvas, app, 0, "instructions");
-      app.screen = Screen::Play; capture(canvas, app, 1000, "play");
+      app.screen = Screen::Play;
+      if (app.game == Game::Baseball) app.baseball.pitch(0, app.random);
+      capture(canvas, app, 1000, "play");
       app.screen = Screen::Result; app.result.score = 100; app.result.elapsedMs = 10000; app.result.newBest = true;
       app.records.submit(app.game, Mode::Voice, 100); capture(canvas, app, 0, "result");
     }
@@ -53,6 +55,14 @@ int main() {
     capture(canvas, app, 0, "flight-long-result");
     app.result.score = UINT32_MAX / 100; app.records.best[3] = {true, app.result.score};
     capture(canvas, app, 0, "flight-max-result");
+    app.game = Game::Baseball; app.screen = Screen::Play;
+    app.baseball = {}; app.baseball.ball = 10; app.baseball.score = 900; app.baseball.pitch(0, app.random);
+    const uint32_t arrival = app.baseball.waitMs + app.baseball.travelMs;
+    capture(canvas, app, arrival - 100, "baseball-final-approach");
+    capture(canvas, app, arrival, "baseball-final-arrival");
+    InputFrame hit; hit.a.pressed = true; hit.a.pressedAt = arrival;
+    app.baseball.update(arrival + 20, hit, app.random);
+    capture(canvas, app, arrival + 20, "baseball-final-perfect");
     std::printf("PASS: %u render previews; Japanese font bounds checked\n", frames);
   } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }

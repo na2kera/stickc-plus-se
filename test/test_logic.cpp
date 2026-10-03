@@ -66,6 +66,52 @@ static void testBaseball() {
   for (unsigned at = 151; at <= 170; ++at) actual.update(arrival + at, raw.update(true, false, arrival + at), random);
   CHECK(actual.lastPoints == 20);
 }
+static void testBaseballDifficulty() {
+  // Check complete games: speed changes at balls 4/7/10, score and finish do not.
+  for (unsigned seed = 1; seed <= 100; ++seed) {
+    Random random(seed); Baseball game; game.pitch(UINT32_MAX - 1000, random);
+    uint32_t previousTravel = 0;
+    for (unsigned ball = 1; ball <= 10; ++ball) {
+      const unsigned stage = ball <= 3 ? 0 : ball <= 6 ? 1 : ball <= 9 ? 2 : 3;
+      CHECK(game.ball == ball && game.difficulty() == stage);
+      const auto& timing = cfg::baseballTiming[stage];
+      CHECK(game.waitMs >= timing.waitMinMs && game.waitMs <= timing.waitMaxMs);
+      CHECK(game.travelMs >= timing.travelMinMs && game.travelMs <= timing.travelMaxMs);
+      if (ball == 4 || ball == 7 || ball == 10) CHECK(game.travelMs < previousTravel);
+      previousTravel = game.travelMs;
+      const uint32_t arrival = game.pitchAt + game.waitMs + game.travelMs;
+      CHECK(!game.update(arrival + 20, pressA(arrival), random));
+      CHECK(game.score == ball * 100 && game.lastPoints == 100);
+      CHECK(!game.update(game.feedbackAt + cfg::pitchFeedbackMs - 1, {}, random));
+      const uint32_t nextAt = game.feedbackAt + cfg::pitchFeedbackMs;
+      CHECK(game.update(nextAt, {}, random) == (ball == 10));
+      if (ball == 10) {
+        CHECK(game.update(nextAt + 1000, pressA(nextAt), random));
+        CHECK(game.ball == 10 && game.score == 1000);
+      }
+    }
+  }
+  // Raw presses pass through the real debounce on every speed tier.
+  // Preserve both sides of each timing boundary, including the fastest pitch.
+  Random random(9);
+  for (unsigned ball : {1u, 4u, 7u, 10u}) {
+    for (int delta : {-151, -150, -101, -100, -51, -50, 0, 50, 51, 100, 101, 150, 151}) {
+      Baseball game; game.ball = ball; game.pitch(UINT32_MAX - 1000, random);
+      const uint32_t arrival = game.pitchAt + game.waitMs + game.travelMs;
+      const uint32_t pressedAt = arrival + delta; Input raw;
+      CHECK(!game.update(pressedAt, raw.update(true, false, pressedAt), random));
+      for (uint32_t offset = 1; offset <= cfg::debounceMs; ++offset)
+        game.update(pressedAt + offset, raw.update(true, false, pressedAt + offset), random);
+      CHECK(game.feedback && game.score == Baseball::points(delta));
+    }
+    Baseball miss; miss.ball = ball; miss.pitch(0, random);
+    const auto arrival = miss.waitMs + miss.travelMs;
+    CHECK(!miss.update(arrival + 150 + cfg::debounceMs, {}, random));
+    CHECK(!miss.feedback);
+    miss.update(arrival + 151 + cfg::debounceMs, {}, random);
+    CHECK(miss.feedback && miss.lastPoints == 0);
+  }
+}
 static void testBalloon() {
   Random random(10);
   for (unsigned limit : {12u, 24u}) {
@@ -238,6 +284,10 @@ static void testApp() {
     CHECK(app.screen == Screen::Result); CHECK(app.takeStorageDirty()); CHECK(!app.takeStorageDirty());
     app.update(endedAt + 1, {}); app.update(endedAt + 2, shortA()); CHECK(app.screen == Screen::Countdown);
     app.update(endedAt + 1502, {}); CHECK(app.screen == Screen::Play);
+    if (game == Game::Baseball) {
+      CHECK(app.baseball.ball == 1 && app.baseball.difficulty() == 0 && app.baseball.score == 0);
+      CHECK(app.baseball.travelMs >= 900 && app.baseball.travelMs <= 1100);
+    }
     InputFrame abort; abort.abort = true; app.update(endedAt + 1503, abort); CHECK(app.screen == Screen::Menu); CHECK(!app.takeStorageDirty());
   }
   App longRun; longRun.game = Game::Flight; longRun.mode = Mode::Button; longRun.screen = Screen::Play;
@@ -292,6 +342,6 @@ static void testPhysicalTransitions() {
   CHECK(!sound.wantsMic() && !sound.muted());
 }
 int main() {
-  testInput(); testBaseball(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions();
+  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions();
   std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions)\n", assertions);
 }
