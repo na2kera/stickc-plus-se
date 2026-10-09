@@ -299,7 +299,7 @@ static void testApp() {
   app.update(1505, hold); CHECK(app.clock.phase == Clock::Phase::Ready); app.update(1510, {});
   app.update(1600, pressA(1580)); app.update(21600, {}); CHECK(app.result.timeout); CHECK(!app.records.best[5].valid);
   app.update(52000, {}); CHECK(app.screen == Screen::Menu);
-  App settings; settings.update(1, {}); settings.selection = 5; settings.update(2, shortB()); settings.update(3, {});
+  App settings; settings.update(1, {}); settings.selection = 6; settings.update(2, shortB()); settings.update(3, {});
   settings.update(4, shortB()); CHECK(!settings.records.settings.sound && settings.takeStorageDirty());
   settings.setting = 4; settings.records.submit(Game::Clock, Mode::Voice, 0); settings.update(5, shortB()); settings.update(6, {});
   InputFrame b; b.b.down = true; b.b.heldMs = 1999; settings.update(2000, b); CHECK(settings.screen == Screen::ResetConfirm);
@@ -332,7 +332,7 @@ static void testPhysicalTransitions() {
   tick(2000, true, true); tick(2020, true, true); tick(2820, false, false);
   CHECK(app.screen == Screen::Menu); tick(2840, false, false);
   CHECK(app.selection == 1 && !app.records.best[1].valid && !app.takeStorageDirty());
-  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 5;
+  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 6;
   reset.update(1, {}); reset.update(2, shortB()); reset.update(3, {}); reset.setting = 4;
   reset.update(4, shortB()); reset.update(5, {});
   reset.update(6, shortB()); CHECK(reset.screen == Screen::ResetConfirm && reset.records.best[5].valid);
@@ -341,7 +341,40 @@ static void testPhysicalTransitions() {
   CHECK(sound.wantsMic() && sound.muted()); sound.screen = Screen::Result;
   CHECK(!sound.wantsMic() && !sound.muted());
 }
+static void testRemote() {
+  App menu; menu.update(1, {});
+  for (unsigned n = 1; n <= 7; ++n) { menu.update(1 + n, shortA()); CHECK(menu.selection == n % 7); }
+  CHECK(!menu.wantsBle());
+  App settings; settings.update(1, {}); settings.selection = 6; settings.update(2, shortB());
+  CHECK(settings.screen == Screen::Settings && !settings.wantsBle());
+  App app; app.update(1, {}); app.selection = 5; app.update(2, shortB());
+  CHECK(app.screen == Screen::Remote && app.wantsBle() && !app.wantsMic() && !app.muted());
+  CHECK(app.takeSound() == Sound::None && app.takeRemoteKey() == RemoteKey::None);
+  // Gate: the first release after entering is swallowed and sends nothing.
+  app.update(3, shortA()); CHECK(app.takeRemoteKey() == RemoteKey::None && app.remote.lastKey == RemoteKey::None);
+  app.update(4, {});
+  app.update(10, shortA()); CHECK(app.remote.lastKey == RemoteKey::Next && app.remote.lastKeyAt == 10);
+  CHECK(app.takeRemoteKey() == RemoteKey::Next); CHECK(app.takeRemoteKey() == RemoteKey::None);
+  app.update(20, shortB()); CHECK(app.remote.lastKey == RemoteKey::Prev && app.remote.lastKeyAt == 20);
+  CHECK(app.takeRemoteKey() == RemoteKey::Prev); CHECK(app.takeRemoteKey() == RemoteKey::None);
+  // Keys are queued even while disconnected; the BLE layer drops them.
+  app.remote.linked = app.remote.ready = false; app.update(30, shortA()); CHECK(app.takeRemoteKey() == RemoteKey::Next);
+  // No idle timeout while presenting.
+  app.update(31030, {}); app.update(120000, {}); CHECK(app.screen == Screen::Remote && app.wantsBle());
+  // Holding both buttons sends nothing and aborts to the menu.
+  InputFrame both; both.both = both.a.down = both.b.down = true; app.update(120001, both);
+  CHECK(app.screen == Screen::Remote && app.takeRemoteKey() == RemoteKey::None);
+  InputFrame abort; abort.abort = abort.both = abort.a.down = abort.b.down = true; app.update(120800, abort);
+  CHECK(app.screen == Screen::Menu && !app.wantsBle() && app.takeRemoteKey() == RemoteKey::None);
+  CHECK(app.selection == 5 && app.takeSound() == Sound::None && !app.takeStorageDirty());
+  // Physical chord: A+B held 800ms leaves without sending a key.
+  App physical; Input input; physical.update(1, {}); physical.selection = 5; physical.update(2, shortB());
+  auto tick = [&](uint32_t now, bool a, bool b) { physical.update(now, input.update(a, b, now)); };
+  tick(10, false, false); tick(100, true, true); tick(120, true, true); tick(920, true, true);
+  CHECK(physical.screen == Screen::Menu); tick(1000, false, false); tick(1020, false, false);
+  CHECK(physical.takeRemoteKey() == RemoteKey::None && physical.screen == Screen::Menu);
+}
 int main() {
-  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions();
-  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions)\n", assertions);
+  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions(); testRemote();
+  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions, remote)\n", assertions);
 }
