@@ -78,6 +78,15 @@ void Hardware::sound(Sound sound, bool enabled, bool muted) {
     case Sound::None: break;
   }
 }
+void Hardware::pollBle(bool wanted, RemoteKey key) {
+  // Bluedroid starts lazily on first entry and stays resident afterwards.
+  if (wanted && !ble.active_) ble.begin();
+  else if (!wanted && ble.active_) ble.end();
+  if (!wanted) return;
+  ble.poll();
+  if (key == RemoteKey::Next) ble.tap(BleKeyboard::rightArrow);
+  else if (key == RemoteKey::Prev) ble.tap(BleKeyboard::leftArrow);
+}
 void render(Hardware& hardware, const App& app, uint32_t now) {
   lgfx::LGFXBase& canvas = hardware.canvasReady ? static_cast<lgfx::LGFXBase&>(hardware.canvas) : static_cast<lgfx::LGFXBase&>(M5.Display);
   drawScreen(canvas, app, now, hardware.boardReady, hardware.storageError);

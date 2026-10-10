@@ -9,7 +9,7 @@ enum class Game : uint8_t { Baseball, Balloon, Memory, Flight, Clock };
 enum class Mode : uint8_t { Voice, Button };
 enum class Screen : uint8_t {
   Menu, Instructions, Countdown, Play, Result, Settings, ResetConfirm,
-  CalQuiet, CalVoice, CalDone, MicError
+  CalQuiet, CalVoice, CalDone, MicError, Remote
 };
 enum class Sound : uint8_t { None, Start, Success, Failure, Best };
 struct Settings { bool sound = true; uint8_t brightness = 1; Mode mode = Mode::Voice; };
@@ -118,10 +118,17 @@ struct Flight {
   static bool hits(float y, const Obstacle& obstacle);
   bool update(uint32_t now, float inputLevel, Random& random);
 };
+enum class RemoteKey : uint8_t { None, Next, Prev };
+struct Remote {
+  bool linked = false, ready = false; // Written by main.cpp from the BLE stack every loop.
+  RemoteKey lastKey = RemoteKey::None;
+  uint32_t lastKeyAt = 0;      // For the on-screen highlight.
+};
 class App {
   uint32_t enteredAt_ = 0, lastActivity_ = 0, lastMicAt_ = 0;
   bool gate_ = true, storageDirty_ = false, calibrationOnly_ = false;
   Sound sound_ = Sound::None;
+  RemoteKey pendingKey_ = RemoteKey::None;
   void transition(Screen next, uint32_t now);
   void start(uint32_t now);
   void finish(uint32_t now);
@@ -140,12 +147,15 @@ public:
   Memory memory;
   Clock clock;
   Flight flight;
+  Remote remote;
   explicit App(uint32_t seed = 1) : random(seed) {}
   void update(uint32_t now, InputFrame input, const MicFrame& mic = {});
   uint32_t screenElapsed(uint32_t now) const { return now - enteredAt_; }
   bool wantsMic() const;
   bool muted() const { return wantsMic(); }
+  bool wantsBle() const { return screen == Screen::Remote; }
   bool takeStorageDirty() { bool value = storageDirty_; storageDirty_ = false; return value; }
   Sound takeSound() { auto value = sound_; sound_ = Sound::None; return value; }
+  RemoteKey takeRemoteKey() { auto value = pendingKey_; pendingKey_ = RemoteKey::None; return value; }
 };
 }

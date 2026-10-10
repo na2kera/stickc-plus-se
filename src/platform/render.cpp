@@ -48,6 +48,17 @@ void icon(lgfx::LGFXBase& c, Game game, int x, int y) {
     case Game::Clock: clockIcon(c, x, y, 28); break;
   }
 }
+void remoteIcon(lgfx::LGFXBase& c, int x, int y) {
+  // Screen with a play/next triangle on a stand; kept right of the description line.
+  c.drawRect(x - 28, y - 24, 56, 40, white); c.drawRect(x - 27, y - 23, 54, 38, white);
+  c.fillTriangle(x - 7, y - 14, x - 7, y + 6, x + 11, y - 4, yellow);
+  c.fillRect(x - 3, y + 16, 6, 8, sky); c.fillRect(x - 14, y + 24, 28, 3, sky);
+}
+void arrow(lgfx::LGFXBase& c, int x, int y, bool right, uint16_t color) {
+  const int d = right ? 1 : -1;
+  c.fillRect(right ? x - 26 : x + 2, y - 7, 24, 14, color);
+  c.fillTriangle(x + d * 26, y, x - d * 2, y - 20, x - d * 2, y + 20, color);
+}
 void bestLabel(lgfx::LGFXBase& c, const App& app, int y) {
   char buffer[50]; const Best& best = app.records.best[app.records.index(app.game, app.mode)];
   if (!best.valid) std::snprintf(buffer, sizeof(buffer), "ベスト --");
@@ -144,6 +155,8 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
   } else switch (app.screen) {
     case Screen::Menu:
       if (app.selection == 5) {
+        text(c, "プレゼンリモコン", 8, 4, white, true); text(c, "PCのスライドを送る", 8, 50, mint); remoteIcon(c, 186, 71);
+      } else if (app.selection == 6) {
         text(c, "設定", 8, 4, white, true); c.drawCircle(120, 67, 26, muted); c.drawCircle(120, 67, 10, mint);
       } else {
         text(c, names[app.selection], 8, 4, white, true); icon(c, Game(app.selection), 156, 71);
@@ -156,7 +169,7 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
         text(c, buffer, 8, 50, mint);
         if (game == Game::Flight) text(c, mode == Mode::Voice ? "音声モード" : "ボタンモード", 8, 79, muted);
       }
-      std::snprintf(buffer, sizeof(buffer), "%u/6", app.selection + 1); text(c, buffer, 8, 94, muted);
+      std::snprintf(buffer, sizeof(buffer), "%u/7", app.selection + 1); text(c, buffer, 8, 94, muted);
       footer(c, "A:次へ B:決定"); break;
     case Screen::Instructions: {
       text(c, names[unsigned(app.game)], 8, 3, yellow, true);
@@ -202,6 +215,16 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
       footer(c, "B:最初から測り直す"); break;
     case Screen::CalDone:
       text(c, "校正できました", 8, 25, mint, true); text(c, "次の声プレイでも測定", 8, 65); footer(c, "A / B:設定へ"); break;
+    case Screen::Remote: {
+      const auto& r = app.remote;
+      text(c, "プレゼンリモコン", 8, 3, yellow, true);
+      if (r.ready) text(c, "接続中", 8, 33, mint);
+      else text(c, r.linked ? "接続準備中" : "接続待ち: StickC Remote", 8, 33, muted);
+      const bool lit = r.lastKey != RemoteKey::None && uint32_t(now - r.lastKeyAt) < 300;
+      arrow(c, 70, 84, false, lit && r.lastKey == RemoteKey::Prev ? yellow : muted);
+      arrow(c, 170, 84, true, lit && r.lastKey == RemoteKey::Next ? yellow : muted);
+      footer(c, "A:次へ B:前へ A+B:終了"); break;
+    }
     case Screen::MicError:
       text(c, "声を確認できません", 8, 14, red); text(c, "周囲より少し大きく", 8, 44); text(c, "再測定かボタンで遊ぶ", 8, 70);
       footer(c, "A:再測定 B:ボタン/戻る"); break;
