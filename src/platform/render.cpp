@@ -54,6 +54,13 @@ void remoteIcon(lgfx::LGFXBase& c, int x, int y) {
   c.fillTriangle(x - 7, y - 14, x - 7, y + 6, x + 11, y - 4, yellow);
   c.fillRect(x - 3, y + 16, 6, 8, sky); c.fillRect(x - 14, y + 24, 28, 3, sky);
 }
+void tvIcon(lgfx::LGFXBase& c, int x, int y) {
+  c.drawRect(x - 28, y - 24, 56, 40, white); c.drawRect(x - 27, y - 23, 54, 38, white);
+  c.drawLine(x - 8, y - 24, x, y - 36, white); c.drawLine(x + 8, y - 24, x, y - 36, white);
+  c.setFont(&fonts::lgfxJapanGothic_16);
+  text(c, "TV", x - c.textWidth("TV") / 2, y - 14, yellow);
+  c.fillRect(x - 3, y + 16, 6, 8, sky); c.fillRect(x - 14, y + 24, 28, 3, sky);
+}
 void arrow(lgfx::LGFXBase& c, int x, int y, bool right, uint16_t color) {
   const int d = right ? 1 : -1;
   c.fillRect(right ? x - 26 : x + 2, y - 7, 24, 14, color);
@@ -157,6 +164,8 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
       if (app.selection == 5) {
         text(c, "プレゼンリモコン", 8, 4, white, true); text(c, "PCのスライドを送る", 8, 50, mint); remoteIcon(c, 186, 71);
       } else if (app.selection == 6) {
+        text(c, "テレビリモコン", 8, 4, white, true); text(c, "SonyのTVを操作", 8, 50, mint); tvIcon(c, 186, 71);
+      } else if (app.selection == 7) {
         text(c, "設定", 8, 4, white, true); c.drawCircle(120, 67, 26, muted); c.drawCircle(120, 67, 10, mint);
       } else {
         text(c, names[app.selection], 8, 4, white, true); icon(c, Game(app.selection), 156, 71);
@@ -169,7 +178,7 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
         text(c, buffer, 8, 50, mint);
         if (game == Game::Flight) text(c, mode == Mode::Voice ? "音声モード" : "ボタンモード", 8, 79, muted);
       }
-      std::snprintf(buffer, sizeof(buffer), "%u/7", app.selection + 1); text(c, buffer, 8, 94, muted);
+      std::snprintf(buffer, sizeof(buffer), "%u/8", app.selection + 1); text(c, buffer, 8, 94, muted);
       footer(c, "A:次へ B:決定"); break;
     case Screen::Instructions: {
       text(c, names[unsigned(app.game)], 8, 3, yellow, true);
@@ -224,6 +233,21 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
       arrow(c, 70, 84, false, lit && r.lastKey == RemoteKey::Prev ? yellow : muted);
       arrow(c, 170, 84, true, lit && r.lastKey == RemoteKey::Next ? yellow : muted);
       footer(c, "A:次へ B:前へ A+B:終了"); break;
+    }
+    case Screen::TvRemote: {
+      const auto& t = app.tv;
+      text(c, "テレビリモコン", 8, 3, yellow, true);
+      text(c, t.sending ? "送信中" : "TVに向けてA/B", 8, 33, t.sending ? mint : muted);
+      const bool lit = t.lastKey != TvKey::None && uint32_t(now - t.lastKeyAt) < 300;
+      const bool up = lit && t.lastKey == TvKey::ChannelUp;
+      const bool down = lit && t.lastKey == TvKey::ChannelDown;
+      c.fillTriangle(70, 56, 62, 68, 78, 68, up ? yellow : muted);
+      c.fillTriangle(170, 68, 162, 56, 178, 56, down ? yellow : muted);
+      c.setFont(&fonts::Font4);
+      const char* upLabel = "CH +"; const char* downLabel = "CH -";
+      number(c, upLabel, 70 - c.textWidth(upLabel) / 2, 70, up ? yellow : muted);
+      number(c, downLabel, 170 - c.textWidth(downLabel) / 2, 70, down ? yellow : muted);
+      footer(c, "A:CH+ B:CH- A+B:終了"); break;
     }
     case Screen::MicError:
       text(c, "声を確認できません", 8, 14, red); text(c, "周囲より少し大きく", 8, 44); text(c, "再測定かボタンで遊ぶ", 8, 70);

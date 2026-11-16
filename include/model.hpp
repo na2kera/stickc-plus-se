@@ -9,7 +9,7 @@ enum class Game : uint8_t { Baseball, Balloon, Memory, Flight, Clock };
 enum class Mode : uint8_t { Voice, Button };
 enum class Screen : uint8_t {
   Menu, Instructions, Countdown, Play, Result, Settings, ResetConfirm,
-  CalQuiet, CalVoice, CalDone, MicError, Remote
+  CalQuiet, CalVoice, CalDone, MicError, Remote, TvRemote
 };
 enum class Sound : uint8_t { None, Start, Success, Failure, Best };
 struct Settings { bool sound = true; uint8_t brightness = 1; Mode mode = Mode::Voice; };
@@ -124,11 +124,18 @@ struct Remote {
   RemoteKey lastKey = RemoteKey::None;
   uint32_t lastKeyAt = 0;      // For the on-screen highlight.
 };
+enum class TvKey : uint8_t { None, ChannelUp, ChannelDown };
+struct Tv {
+  TvKey lastKey = TvKey::None;
+  uint32_t lastKeyAt = 0;
+  bool sending = false; // Written by main.cpp from the IR layer.
+};
 class App {
   uint32_t enteredAt_ = 0, lastActivity_ = 0, lastMicAt_ = 0;
   bool gate_ = true, storageDirty_ = false, calibrationOnly_ = false;
   Sound sound_ = Sound::None;
   RemoteKey pendingKey_ = RemoteKey::None;
+  TvKey pendingTvKey_ = TvKey::None;
   void transition(Screen next, uint32_t now);
   void start(uint32_t now);
   void finish(uint32_t now);
@@ -148,14 +155,17 @@ public:
   Clock clock;
   Flight flight;
   Remote remote;
+  Tv tv;
   explicit App(uint32_t seed = 1) : random(seed) {}
   void update(uint32_t now, InputFrame input, const MicFrame& mic = {});
   uint32_t screenElapsed(uint32_t now) const { return now - enteredAt_; }
   bool wantsMic() const;
   bool muted() const { return wantsMic(); }
   bool wantsBle() const { return screen == Screen::Remote; }
+  bool wantsIr() const { return screen == Screen::TvRemote; }
   bool takeStorageDirty() { bool value = storageDirty_; storageDirty_ = false; return value; }
   Sound takeSound() { auto value = sound_; sound_ = Sound::None; return value; }
   RemoteKey takeRemoteKey() { auto value = pendingKey_; pendingKey_ = RemoteKey::None; return value; }
+  TvKey takeTvKey() { auto value = pendingTvKey_; pendingTvKey_ = TvKey::None; return value; }
 };
 }

@@ -17,7 +17,7 @@ int main() {
   try {
     lgfx::LGFX_Sprite canvas; canvas.setColorDepth(16); canvas.createSprite(240, 135);
     App app;
-    for (unsigned n = 0; n < 7; ++n) { app.selection = n; capture(canvas, app, 0, "menu"); }
+    for (unsigned n = 0; n < 8; ++n) { app.selection = n; capture(canvas, app, 0, "menu"); }
     for (unsigned n = 0; n < 5; ++n) {
       app.game = Game(n); app.screen = Screen::Instructions; capture(canvas, app, 0, "instructions");
       app.screen = Screen::Play;
@@ -69,6 +69,11 @@ int main() {
     app.remote.lastKey = RemoteKey::Next; app.remote.lastKeyAt = 1000; capture(canvas, app, 1100, "remote-next");
     app.remote.lastKey = RemoteKey::Prev; capture(canvas, app, 1100, "remote-prev");
     capture(canvas, app, 1300, "remote-faded");
+    app.screen = Screen::TvRemote; app.tv = {}; capture(canvas, app, 0, "tv-idle");
+    app.tv.sending = true; capture(canvas, app, 0, "tv-sending");
+    app.tv.sending = false; app.tv.lastKey = TvKey::ChannelUp; app.tv.lastKeyAt = 1000; capture(canvas, app, 1100, "tv-up");
+    app.tv.lastKey = TvKey::ChannelDown; capture(canvas, app, 1100, "tv-down");
+    capture(canvas, app, 1300, "tv-faded");
     std::printf("PASS: %u render previews; Japanese font bounds checked\n", frames);
   } catch (const std::exception& error) { std::fprintf(stderr, "%s\n", error.what()); return 1; }
 }

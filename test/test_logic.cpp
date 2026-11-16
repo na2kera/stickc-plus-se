@@ -1,4 +1,5 @@
 #include "model.hpp"
+#include "sirc.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -299,7 +300,7 @@ static void testApp() {
   app.update(1505, hold); CHECK(app.clock.phase == Clock::Phase::Ready); app.update(1510, {});
   app.update(1600, pressA(1580)); app.update(21600, {}); CHECK(app.result.timeout); CHECK(!app.records.best[5].valid);
   app.update(52000, {}); CHECK(app.screen == Screen::Menu);
-  App settings; settings.update(1, {}); settings.selection = 6; settings.update(2, shortB()); settings.update(3, {});
+  App settings; settings.update(1, {}); settings.selection = 7; settings.update(2, shortB()); settings.update(3, {});
   settings.update(4, shortB()); CHECK(!settings.records.settings.sound && settings.takeStorageDirty());
   settings.setting = 4; settings.records.submit(Game::Clock, Mode::Voice, 0); settings.update(5, shortB()); settings.update(6, {});
   InputFrame b; b.b.down = true; b.b.heldMs = 1999; settings.update(2000, b); CHECK(settings.screen == Screen::ResetConfirm);
@@ -332,7 +333,7 @@ static void testPhysicalTransitions() {
   tick(2000, true, true); tick(2020, true, true); tick(2820, false, false);
   CHECK(app.screen == Screen::Menu); tick(2840, false, false);
   CHECK(app.selection == 1 && !app.records.best[1].valid && !app.takeStorageDirty());
-  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 6;
+  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 7;
   reset.update(1, {}); reset.update(2, shortB()); reset.update(3, {}); reset.setting = 4;
   reset.update(4, shortB()); reset.update(5, {});
   reset.update(6, shortB()); CHECK(reset.screen == Screen::ResetConfirm && reset.records.best[5].valid);
@@ -343,12 +344,12 @@ static void testPhysicalTransitions() {
 }
 static void testRemote() {
   App menu; menu.update(1, {});
-  for (unsigned n = 1; n <= 7; ++n) { menu.update(1 + n, shortA()); CHECK(menu.selection == n % 7); }
-  CHECK(!menu.wantsBle());
-  App settings; settings.update(1, {}); settings.selection = 6; settings.update(2, shortB());
-  CHECK(settings.screen == Screen::Settings && !settings.wantsBle());
+  for (unsigned n = 1; n <= 8; ++n) { menu.update(1 + n, shortA()); CHECK(menu.selection == n % 8); }
+  CHECK(!menu.wantsBle() && !menu.wantsIr());
+  App settings; settings.update(1, {}); settings.selection = 7; settings.update(2, shortB());
+  CHECK(settings.screen == Screen::Settings && !settings.wantsBle() && !settings.wantsIr());
   App app; app.update(1, {}); app.selection = 5; app.update(2, shortB());
-  CHECK(app.screen == Screen::Remote && app.wantsBle() && !app.wantsMic() && !app.muted());
+  CHECK(app.screen == Screen::Remote && app.wantsBle() && !app.wantsIr() && !app.wantsMic() && !app.muted());
   CHECK(app.takeSound() == Sound::None && app.takeRemoteKey() == RemoteKey::None);
   // Gate: the first release after entering is swallowed and sends nothing.
   app.update(3, shortA()); CHECK(app.takeRemoteKey() == RemoteKey::None && app.remote.lastKey == RemoteKey::None);
@@ -374,7 +375,58 @@ static void testRemote() {
   CHECK(physical.screen == Screen::Menu); tick(1000, false, false); tick(1020, false, false);
   CHECK(physical.takeRemoteKey() == RemoteKey::None && physical.screen == Screen::Menu);
 }
+static void testTvRemote() {
+  App app; app.update(1, {}); app.tv.lastKey = TvKey::ChannelUp; app.selection = 6; app.update(2, shortB());
+  CHECK(app.screen == Screen::TvRemote && app.wantsIr() && !app.wantsBle() && !app.wantsMic() && !app.muted());
+  CHECK(app.tv.lastKey == TvKey::None && app.takeSound() == Sound::None && app.takeTvKey() == TvKey::None);
+  // Gate: the first release after entering is swallowed and sends nothing.
+  app.update(3, shortA()); CHECK(app.takeTvKey() == TvKey::None && app.tv.lastKey == TvKey::None);
+  app.update(4, {});
+  app.update(10, shortA()); CHECK(app.tv.lastKey == TvKey::ChannelUp && app.tv.lastKeyAt == 10);
+  CHECK(app.takeTvKey() == TvKey::ChannelUp); CHECK(app.takeTvKey() == TvKey::None);
+  app.update(20, shortB()); CHECK(app.tv.lastKey == TvKey::ChannelDown && app.tv.lastKeyAt == 20);
+  CHECK(app.takeTvKey() == TvKey::ChannelDown); CHECK(app.takeTvKey() == TvKey::None);
+  // No idle timeout while aiming at the TV.
+  app.update(31030, {}); app.update(120000, {}); CHECK(app.screen == Screen::TvRemote && app.wantsIr() && !app.wantsBle());
+  // Holding both buttons sends nothing and aborts to the menu.
+  InputFrame both; both.both = both.a.down = both.b.down = true; app.update(120001, both);
+  CHECK(app.screen == Screen::TvRemote && app.takeTvKey() == TvKey::None);
+  InputFrame abort; abort.abort = abort.both = abort.a.down = abort.b.down = true; app.update(120800, abort);
+  CHECK(app.screen == Screen::Menu && !app.wantsIr() && app.takeTvKey() == TvKey::None);
+  CHECK(app.selection == 6 && app.takeSound() == Sound::None && !app.takeStorageDirty());
+  // Physical chord: A+B held 800ms leaves without sending a key.
+  App physical; Input input; physical.update(1, {}); physical.selection = 6; physical.update(2, shortB());
+  auto tick = [&](uint32_t now, bool a, bool b) { physical.update(now, input.update(a, b, now)); };
+  tick(10, false, false); tick(100, true, true); tick(120, true, true); tick(920, true, true);
+  CHECK(physical.screen == Screen::Menu); tick(1000, false, false); tick(1020, false, false);
+  CHECK(physical.takeTvKey() == TvKey::None && physical.screen == Screen::Menu);
+}
+static void testSirc() {
+  CHECK(sircPulses == 13 && sircRepeats == 3 && sircFramePeriodUs == 45000);
+  CHECK(sircTv == 1 && sircChannelUp == 16 && sircChannelDown == 17);
+  CHECK(sircPower == 21 && sircVolumeUp == 18 && sircVolumeDown == 19);
+  const auto lsb = sircEncode(0x01, 0x00);
+  CHECK(lsb[0].markUs == 2400 && lsb[0].spaceUs == 600);
+  CHECK(lsb[1].markUs == 1200 && lsb[1].spaceUs == 600);
+  for (unsigned i = 2; i < sircPulses; ++i) CHECK(lsb[i].markUs == 600 && lsb[i].spaceUs == 600);
+  const auto high = sircEncode(0x40, 0x10); // command bit 6, then device bit 4, both LSB first.
+  CHECK(high[7].markUs == 1200 && high[12].markUs == 1200);
+  CHECK(high[1].markUs == 600 && high[8].markUs == 600);
+  const auto up = sircEncode(16, 1);
+  const uint16_t upMarks[12] = {600, 600, 600, 600, 1200, 600, 600, 1200, 600, 600, 600, 600};
+  for (unsigned i = 0; i < 12; ++i) CHECK(up[i + 1].markUs == upMarks[i] && up[i + 1].spaceUs == 600);
+  CHECK(sircFrameLengthUs(up) == 18600);
+  const auto down = sircEncode(17, 1);
+  const uint16_t downMarks[12] = {1200, 600, 600, 600, 1200, 600, 600, 1200, 600, 600, 600, 600};
+  for (unsigned i = 0; i < 12; ++i) CHECK(down[i + 1].markUs == downMarks[i] && down[i + 1].spaceUs == 600);
+  CHECK(sircFrameLengthUs(down) == 19200);
+  const auto masked = sircEncode(uint8_t(16 | 0x80), uint8_t(1 | 0xE0));
+  for (unsigned i = 0; i < sircPulses; ++i) CHECK(masked[i].markUs == up[i].markUs && masked[i].spaceUs == up[i].spaceUs);
+  const auto wide = sircEncode(0xFF, 0xFF);
+  for (unsigned i = 1; i < sircPulses; ++i) CHECK(wide[i].markUs == 1200 && wide[i].spaceUs == 600);
+  CHECK(sircFrameLengthUs(wide) == 2400 + 600 + 12 * (1200 + 600));
+}
 int main() {
-  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions(); testRemote();
-  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions, remote)\n", assertions);
+  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions(); testRemote(); testTvRemote(); testSirc();
+  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions, remote, tv remote, sirc)\n", assertions);
 }
