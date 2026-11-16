@@ -61,6 +61,11 @@ void tvIcon(lgfx::LGFXBase& c, int x, int y) {
   text(c, "TV", x - c.textWidth("TV") / 2, y - 14, yellow);
   c.fillRect(x - 3, y + 16, 6, 8, sky); c.fillRect(x - 14, y + 24, 28, 3, sky);
 }
+void cameraIcon(lgfx::LGFXBase& c, int x, int y, uint16_t color) {
+  c.drawRect(x - 26, y - 18, 52, 36, color); c.drawRect(x - 25, y - 17, 50, 34, color);
+  c.drawRect(x - 10, y - 24, 20, 7, color);
+  c.drawCircle(x, y, 12, color); c.drawCircle(x, y, 6, color);
+}
 void arrow(lgfx::LGFXBase& c, int x, int y, bool right, uint16_t color) {
   const int d = right ? 1 : -1;
   c.fillRect(right ? x - 26 : x + 2, y - 7, 24, 14, color);
@@ -166,6 +171,8 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
       } else if (app.selection == 6) {
         text(c, "テレビリモコン", 8, 4, white, true); text(c, "SonyのTVを操作", 8, 50, mint); tvIcon(c, 186, 71);
       } else if (app.selection == 7) {
+        text(c, "カメラシャッター", 8, 4, white, true); text(c, "iPhoneで写真を撮る", 8, 50, mint); cameraIcon(c, 186, 71, white);
+      } else if (app.selection == 8) {
         text(c, "設定", 8, 4, white, true); c.drawCircle(120, 67, 26, muted); c.drawCircle(120, 67, 10, mint);
       } else {
         text(c, names[app.selection], 8, 4, white, true); icon(c, Game(app.selection), 156, 71);
@@ -178,7 +185,7 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
         text(c, buffer, 8, 50, mint);
         if (game == Game::Flight) text(c, mode == Mode::Voice ? "音声モード" : "ボタンモード", 8, 79, muted);
       }
-      std::snprintf(buffer, sizeof(buffer), "%u/8", app.selection + 1); text(c, buffer, 8, 94, muted);
+      std::snprintf(buffer, sizeof(buffer), "%u/9", app.selection + 1); text(c, buffer, 8, 94, muted);
       footer(c, "A:次へ B:決定"); break;
     case Screen::Instructions: {
       text(c, names[unsigned(app.game)], 8, 3, yellow, true);
@@ -248,6 +255,15 @@ void drawScreen(lgfx::LGFXBase& c, const App& app, uint32_t now, bool boardReady
       number(c, upLabel, 70 - c.textWidth(upLabel) / 2, 70, up ? yellow : muted);
       number(c, downLabel, 170 - c.textWidth(downLabel) / 2, 70, down ? yellow : muted);
       footer(c, "A:CH+ B:CH- A+B:終了"); break;
+    }
+    case Screen::Camera: {
+      const auto& r = app.remote;
+      text(c, "カメラシャッター", 8, 3, yellow, true);
+      if (r.shutterReady) text(c, "接続中", 8, 33, mint);
+      else text(c, r.linked ? "接続準備中" : "接続待ち: StickC Remote", 8, 33, muted);
+      const bool lit = r.lastKey == RemoteKey::Shutter && uint32_t(now - r.lastKeyAt) < 300;
+      cameraIcon(c, 120, 84, lit ? yellow : muted);
+      footer(c, "A:シャッター A+B:終了"); break;
     }
     case Screen::MicError:
       text(c, "声を確認できません", 8, 14, red); text(c, "周囲より少し大きく", 8, 44); text(c, "再測定かボタンで遊ぶ", 8, 70);
