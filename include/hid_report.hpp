@@ -81,7 +81,7 @@ public:
 protected:
   ~HidPort() = default;
 };
-constexpr uint32_t hidReleaseDelayMs = 8; // Provisional until checked on an iPhone.
+constexpr uint32_t hidReleaseDelayMs = 8; // Takes one photo per press on an iPhone 14 (iOS 27.2.1).
 // Several iOS connection intervals (15-30 ms), so queued packets can drain between attempts.
 constexpr uint32_t hidRecoveryMs = 100;
 // Main loop only. Keeps a failed release or a requested disconnect alive across calls until the
