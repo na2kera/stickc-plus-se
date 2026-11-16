@@ -24,11 +24,13 @@ void loop() {
   const auto mic = hardware.pollMic(hardware.boardReady && app.wantsMic(), now);
   const auto previousScreen = app.screen;
   app.remote.linked = hardware.ble.linked(); app.remote.ready = hardware.ble.ready();
+  app.tv.sending = hardware.ir.busy();
   if (hardware.boardReady) app.update(now, input, mic);
   if (previousScreen != app.screen) M5.Speaker.stop();
   // Stop capture immediately on exit/error; never reuse the buffer before end().
   if (!app.wantsMic()) hardware.pollMic(false, now);
   hardware.pollBle(app.wantsBle(), app.takeRemoteKey());
+  hardware.pollIr(app.wantsIr(), app.takeTvKey());
   if (app.takeStorageDirty()) {
     hardware.save(app.records);
     M5.Display.setBrightness(mini::cfg::brightness[app.records.settings.brightness]);

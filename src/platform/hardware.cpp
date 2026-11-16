@@ -87,6 +87,14 @@ void Hardware::pollBle(bool wanted, RemoteKey key) {
   if (key == RemoteKey::Next) ble.tap(BleKeyboard::rightArrow);
   else if (key == RemoteKey::Prev) ble.tap(BleKeyboard::leftArrow);
 }
+void Hardware::pollIr(bool wanted, TvKey key) {
+  if (wanted) ir.begin();
+  else ir.end();
+  if (!wanted) return;
+  ir.poll();
+  if (key == TvKey::ChannelUp) ir.send(sircChannelUp, sircTv);
+  else if (key == TvKey::ChannelDown) ir.send(sircChannelDown, sircTv);
+}
 void render(Hardware& hardware, const App& app, uint32_t now) {
   lgfx::LGFXBase& canvas = hardware.canvasReady ? static_cast<lgfx::LGFXBase&>(hardware.canvas) : static_cast<lgfx::LGFXBase&>(M5.Display);
   drawScreen(canvas, app, now, hardware.boardReady, hardware.storageError);

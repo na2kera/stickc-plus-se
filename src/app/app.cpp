@@ -42,7 +42,7 @@ void App::finish(uint32_t now) {
 }
 void App::update(uint32_t now, InputFrame input, const MicFrame& mic) {
   if (input.anyEvent() || input.a.down || input.b.down) lastActivity_ = now;
-  if ((screen == Screen::Play || screen == Screen::Countdown || screen == Screen::CalQuiet || screen == Screen::CalVoice || screen == Screen::Remote) && input.abort) {
+  if ((screen == Screen::Play || screen == Screen::Countdown || screen == Screen::CalQuiet || screen == Screen::CalVoice || screen == Screen::Remote || screen == Screen::TvRemote) && input.abort) {
     calibrationOnly_ = false; transition(Screen::Menu, now); sound_ = Sound::None; return;
   }
   if (input.both) { input.a.pressed = input.b.pressed = input.a.shortPress = input.b.shortPress = false; }
@@ -59,10 +59,11 @@ void App::update(uint32_t now, InputFrame input, const MicFrame& mic) {
   }
   switch (screen) {
     case Screen::Menu:
-      if (input.a.shortPress) selection = (selection + 1) % 7;
+      if (input.a.shortPress) selection = (selection + 1) % 8;
       if (input.b.shortPress) {
         if (selection == 5) { remote.lastKey = RemoteKey::None; pendingKey_ = RemoteKey::None; transition(Screen::Remote, now); }
-        else if (selection == 6) { setting = 0; transition(Screen::Settings, now); }
+        else if (selection == 6) { tv.lastKey = TvKey::None; pendingTvKey_ = TvKey::None; transition(Screen::TvRemote, now); }
+        else if (selection == 7) { setting = 0; transition(Screen::Settings, now); }
         else { game = Game(selection); mode = records.settings.mode; transition(Screen::Instructions, now); }
       }
       break;
@@ -148,6 +149,10 @@ void App::update(uint32_t now, InputFrame input, const MicFrame& mic) {
       // Queue regardless of connection; the BLE layer drops keys until ready.
       if (input.a.shortPress) { pendingKey_ = remote.lastKey = RemoteKey::Next; remote.lastKeyAt = now; }
       else if (input.b.shortPress) { pendingKey_ = remote.lastKey = RemoteKey::Prev; remote.lastKeyAt = now; }
+      break;
+    case Screen::TvRemote:
+      if (input.a.shortPress) { pendingTvKey_ = tv.lastKey = TvKey::ChannelUp; tv.lastKeyAt = now; }
+      else if (input.b.shortPress) { pendingTvKey_ = tv.lastKey = TvKey::ChannelDown; tv.lastKeyAt = now; }
       break;
     case Screen::MicError:
       if (input.a.shortPress) beginCalibration(now);
