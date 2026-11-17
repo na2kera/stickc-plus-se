@@ -1,9 +1,12 @@
 #include "model.hpp"
 #include "sirc.hpp"
+#include "hid_report.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <string>
+#include <vector>
 using namespace mini;
 static unsigned assertions = 0;
 #define CHECK(expr) do { ++assertions; if (!(expr)) { std::fprintf(stderr, "%s:%d: %s\n", __FILE__, __LINE__, #expr); std::exit(1); } } while (0)
@@ -300,7 +303,7 @@ static void testApp() {
   app.update(1505, hold); CHECK(app.clock.phase == Clock::Phase::Ready); app.update(1510, {});
   app.update(1600, pressA(1580)); app.update(21600, {}); CHECK(app.result.timeout); CHECK(!app.records.best[5].valid);
   app.update(52000, {}); CHECK(app.screen == Screen::Menu);
-  App settings; settings.update(1, {}); settings.selection = 7; settings.update(2, shortB()); settings.update(3, {});
+  App settings; settings.update(1, {}); settings.selection = 8; settings.update(2, shortB()); settings.update(3, {});
   settings.update(4, shortB()); CHECK(!settings.records.settings.sound && settings.takeStorageDirty());
   settings.setting = 4; settings.records.submit(Game::Clock, Mode::Voice, 0); settings.update(5, shortB()); settings.update(6, {});
   InputFrame b; b.b.down = true; b.b.heldMs = 1999; settings.update(2000, b); CHECK(settings.screen == Screen::ResetConfirm);
@@ -333,7 +336,7 @@ static void testPhysicalTransitions() {
   tick(2000, true, true); tick(2020, true, true); tick(2820, false, false);
   CHECK(app.screen == Screen::Menu); tick(2840, false, false);
   CHECK(app.selection == 1 && !app.records.best[1].valid && !app.takeStorageDirty());
-  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 7;
+  App reset; reset.records.submit(Game::Clock, Mode::Voice, 0); reset.selection = 8;
   reset.update(1, {}); reset.update(2, shortB()); reset.update(3, {}); reset.setting = 4;
   reset.update(4, shortB()); reset.update(5, {});
   reset.update(6, shortB()); CHECK(reset.screen == Screen::ResetConfirm && reset.records.best[5].valid);
@@ -344,9 +347,9 @@ static void testPhysicalTransitions() {
 }
 static void testRemote() {
   App menu; menu.update(1, {});
-  for (unsigned n = 1; n <= 8; ++n) { menu.update(1 + n, shortA()); CHECK(menu.selection == n % 8); }
+  for (unsigned n = 1; n <= 9; ++n) { menu.update(1 + n, shortA()); CHECK(menu.selection == n % 9); }
   CHECK(!menu.wantsBle() && !menu.wantsIr());
-  App settings; settings.update(1, {}); settings.selection = 7; settings.update(2, shortB());
+  App settings; settings.update(1, {}); settings.selection = 8; settings.update(2, shortB());
   CHECK(settings.screen == Screen::Settings && !settings.wantsBle() && !settings.wantsIr());
   App app; app.update(1, {}); app.selection = 5; app.update(2, shortB());
   CHECK(app.screen == Screen::Remote && app.wantsBle() && !app.wantsIr() && !app.wantsMic() && !app.muted());
@@ -426,7 +429,316 @@ static void testSirc() {
   for (unsigned i = 1; i < sircPulses; ++i) CHECK(wide[i].markUs == 1200 && wide[i].spaceUs == 600);
   CHECK(sircFrameLengthUs(wide) == 2400 + 600 + 12 * (1200 + 600));
 }
+static void testCamera() {
+  App app; app.update(1, {}); app.remote.lastKey = RemoteKey::Next; app.selection = 7; app.update(2, shortB());
+  CHECK(app.screen == Screen::Camera && app.wantsBle() && !app.wantsIr() && !app.wantsMic() && !app.muted());
+  CHECK(app.remote.lastKey == RemoteKey::None && app.takeSound() == Sound::None && app.takeRemoteKey() == RemoteKey::None);
+  // Gate: the first release after entering is swallowed and sends nothing.
+  app.update(3, shortA()); CHECK(app.takeRemoteKey() == RemoteKey::None && app.remote.lastKey == RemoteKey::None);
+  app.update(4, {});
+  app.update(10, shortA()); CHECK(app.remote.lastKey == RemoteKey::Shutter && app.remote.lastKeyAt == 10);
+  CHECK(app.takeRemoteKey() == RemoteKey::Shutter); CHECK(app.takeRemoteKey() == RemoteKey::None);
+  // B alone does nothing.
+  app.update(20, shortB());
+  CHECK(app.screen == Screen::Camera && app.remote.lastKeyAt == 10 && app.takeRemoteKey() == RemoteKey::None);
+  // Queued even while disconnected; the BLE layer drops it.
+  app.remote.linked = app.remote.ready = app.remote.shutterReady = false;
+  app.update(30, shortA()); CHECK(app.takeRemoteKey() == RemoteKey::Shutter && app.remote.lastKeyAt == 30);
+  // No idle timeout while taking photos.
+  app.update(31030, {}); app.update(120000, {}); CHECK(app.screen == Screen::Camera && app.wantsBle());
+  InputFrame both; both.both = both.a.down = both.b.down = true; app.update(120001, both);
+  CHECK(app.screen == Screen::Camera && app.takeRemoteKey() == RemoteKey::None);
+  InputFrame abort; abort.abort = abort.both = abort.a.down = abort.b.down = true; app.update(120800, abort);
+  CHECK(app.screen == Screen::Menu && !app.wantsBle() && app.takeRemoteKey() == RemoteKey::None);
+  CHECK(app.selection == 7 && app.takeSound() == Sound::None && !app.takeStorageDirty());
+  // An untaken shutter press never reaches the presentation remote.
+  App leak; leak.update(1, {}); leak.selection = 7; leak.update(2, shortB()); leak.update(3, {});
+  leak.update(10, shortA()); leak.update(800, abort); CHECK(leak.screen == Screen::Menu);
+  leak.selection = 5; leak.update(900, {}); leak.update(901, shortB());
+  CHECK(leak.screen == Screen::Remote && leak.remote.lastKey == RemoteKey::None && leak.takeRemoteKey() == RemoteKey::None);
+  leak.update(902, {}); leak.update(910, shortA()); CHECK(leak.takeRemoteKey() == RemoteKey::Next);
+  // And the reverse: an untaken arrow key never reaches the camera.
+  App back; back.update(1, {}); back.selection = 5; back.update(2, shortB()); back.update(3, {});
+  back.update(10, shortA()); back.update(800, abort); CHECK(back.screen == Screen::Menu);
+  back.selection = 7; back.update(900, {}); back.update(901, shortB());
+  CHECK(back.screen == Screen::Camera && back.remote.lastKey == RemoteKey::None && back.takeRemoteKey() == RemoteKey::None);
+  // Physical chord: A+B held 800ms leaves without sending a key.
+  App physical; Input input; physical.update(1, {}); physical.selection = 7; physical.update(2, shortB());
+  auto tick = [&](uint32_t now, bool a, bool b) { physical.update(now, input.update(a, b, now)); };
+  tick(10, false, false); tick(100, true, true); tick(120, true, true); tick(920, true, true);
+  CHECK(physical.screen == Screen::Menu); tick(1000, false, false); tick(1020, false, false);
+  CHECK(physical.takeRemoteKey() == RemoteKey::None && physical.screen == Screen::Menu && physical.selection == 7);
+}
+namespace {
+struct FakePort final : HidPort {
+  struct Sent { uint16_t connId; HidReport report; std::vector<uint8_t> bytes; };
+  HidLink& link;
+  HidRemote* remote = nullptr; // When set, disconnect events go through it like the BT callback.
+  std::vector<Sent> sent;
+  std::vector<uint16_t> closed;
+  std::string events; // S start, A/a advertise on/off, s send, w wait, d disconnect request; in call order.
+  std::vector<bool> results; // Outcome of each send in order; true once exhausted.
+  std::vector<uint8_t> value[2] = {std::vector<uint8_t>(8, 0), std::vector<uint8_t>(1, 0)};
+  std::vector<uint16_t> keep; // Connections whose close request never takes effect.
+  bool dropOnWait = false, reconnectOnWait = false, closes = true; size_t dropOnSend = 0; unsigned foreign = 0;
+  uint32_t clock = 0, waited = 0;
+  explicit FakePort(HidLink& l) : link(l) {}
+  explicit FakePort(HidRemote& r) : link(r.link), remote(&r) {}
+  void drop(uint16_t connId) { if (remote) remote->disconnected(connId); else link.disconnect(connId); }
+  void start() override { events += 'S'; }
+  void advertise(bool on) override { events += on ? 'A' : 'a'; }
+  bool send(uint16_t connId, HidReport report, const uint8_t* data, size_t size) override {
+    if (!link.linked() || connId != link.connId()) ++foreign; // Sent anywhere but the current link.
+    store(report, data, size); sent.push_back({connId, report, {data, data + size}}); events += 's';
+    if (sent.size() == dropOnSend) drop(link.connId()); // The failure was the link going away.
+    return sent.size() > results.size() || results[sent.size() - 1];
+  }
+  void store(HidReport report, const uint8_t* data, size_t size) override { value[unsigned(report)].assign(data, data + size); }
+  void disconnect(uint16_t connId) override {
+    closed.push_back(connId); events += 'd';
+    if (closes && std::find(keep.begin(), keep.end(), connId) == keep.end()) drop(connId);
+  }
+  void wait(uint32_t ms) override {
+    clock += ms; waited += ms; events += 'w';
+    if (dropOnWait || reconnectOnWait) drop(link.connId());
+    if (reconnectOnWait) { link.connect(7); link.subscribe(HidReport::Keyboard, true); link.subscribe(HidReport::Consumer, true); }
+  }
+  uint32_t now() override { return clock; }
+  bool released(HidReport report) const {
+    const auto& v = value[unsigned(report)];
+    return v.size() == (report == HidReport::Keyboard ? 8u : 1u) && std::all_of(v.begin(), v.end(), [](uint8_t b) { return b == 0; });
+  }
+};
+}
+static void testHid() {
+  const uint8_t keyboard[] = {
+    0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01, 0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7,
+    0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02, 0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
+    0x95, 0x06, 0x75, 0x08, 0x15, 0x00, 0x25, 0x65, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0};
+  const uint8_t consumer[] = {
+    0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01, 0x85, 0x02, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x01,
+    0x09, 0xE9, 0x81, 0x02, 0x95, 0x07, 0x81, 0x01, 0xC0};
+  CHECK(hidKeyboardMapSize == sizeof(keyboard) && hidReportMap.size() == sizeof(keyboard) + sizeof(consumer));
+  CHECK(std::equal(keyboard, keyboard + sizeof(keyboard), hidReportMap.begin()));
+  CHECK(std::equal(consumer, consumer + sizeof(consumer), hidReportMap.begin() + hidKeyboardMapSize));
+  CHECK(hidReportId(HidReport::Keyboard) == 1 && hidReportId(HidReport::Consumer) == 2);
+  // Subscriptions are per report and cleared on connect and disconnect.
+  HidLink link;
+  CHECK(!link.linked() && !link.ready(HidReport::Keyboard) && !link.ready(HidReport::Consumer));
+  link.subscribe(HidReport::Keyboard, true); CHECK(!link.ready(HidReport::Keyboard)); // Not connected.
+  link.connect(1); CHECK(link.linked() && !link.ready(HidReport::Keyboard) && !link.ready(HidReport::Consumer));
+  link.subscribe(HidReport::Keyboard, true); CHECK(link.ready(HidReport::Keyboard) && !link.ready(HidReport::Consumer));
+  link.subscribe(HidReport::Keyboard, false); link.subscribe(HidReport::Consumer, true);
+  CHECK(!link.ready(HidReport::Keyboard) && link.ready(HidReport::Consumer));
+  link.subscribe(HidReport::Keyboard, true); CHECK(link.ready(HidReport::Keyboard) && link.ready(HidReport::Consumer));
+  link.disconnect(1); CHECK(!link.linked() && !link.ready(HidReport::Keyboard) && !link.ready(HidReport::Consumer));
+  link.connect(1); CHECK(link.linked() && !link.ready(HidReport::Keyboard) && !link.ready(HidReport::Consumer));
+  // connect() and disconnect() each clear the subscriptions themselves.
+  link.subscribe(HidReport::Consumer, true); CHECK(link.subscribed(HidReport::Consumer));
+  link.connect(1); CHECK(!link.subscribed(HidReport::Consumer) && !link.subscribed(HidReport::Keyboard));
+  link.subscribe(HidReport::Keyboard, true); link.subscribe(HidReport::Consumer, true);
+  link.disconnect(1); CHECK(!link.subscribed(HidReport::Keyboard) && !link.subscribed(HidReport::Consumer));
+  const uint32_t before = link.session(); link.connect(1); CHECK(link.session() == before + 1);
+  // A disconnect event of another connection changes nothing.
+  link.subscribe(HidReport::Keyboard, true); link.subscribe(HidReport::Consumer, true);
+  CHECK(!link.disconnect(2) && link.linked() && link.connId() == 1 && link.ready(HidReport::Keyboard) && link.ready(HidReport::Consumer));
+  CHECK(link.disconnect(1) && !link.linked() && !link.disconnect(1));
+  auto subscribe = [](HidLink& l) { l.connect(1); l.subscribe(HidReport::Keyboard, true); l.subscribe(HidReport::Consumer, true); };
+  const std::vector<uint8_t> volumePress{0x01}, volumeRelease{0x00}, rightPress{0, 0, 0x4F, 0, 0, 0, 0, 0}, keyRelease(8, 0);
+  CHECK(hidReleaseDelayMs == 8 && hidRecoveryMs == 100);
+  { // Volume tap: 01, wait, 00 on report 2 of the current connection only.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    CHECK(port.events == "sws" && port.waited == hidReleaseDelayMs && !hid.busy());
+    CHECK(port.sent[0].connId == 1 && port.sent[0].report == HidReport::Consumer && port.sent[0].bytes == volumePress);
+    CHECK(port.sent[1].connId == 1 && port.sent[1].report == HidReport::Consumer && port.sent[1].bytes == volumeRelease);
+    CHECK(port.released(HidReport::Consumer) && port.released(HidReport::Keyboard) && l.linked());
+    port.clock = 1000; hid.poll(l, port); CHECK(port.events == "sws");
+  }
+  { // Keyboard tap: 8 bytes on report 1 only.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; hid.tap(l, port, HidReport::Keyboard, 0x4F);
+    CHECK(port.events == "sws" && !hid.busy());
+    CHECK(port.sent[0].report == HidReport::Keyboard && port.sent[0].bytes == rightPress);
+    CHECK(port.sent[1].report == HidReport::Keyboard && port.sent[1].bytes == keyRelease);
+    CHECK(port.released(HidReport::Keyboard) && port.released(HidReport::Consumer));
+  }
+  { // Each report is gated by its own subscription.
+    HidLink l; l.connect(1); l.subscribe(HidReport::Keyboard, true); FakePort port(l); HidSender hid;
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); CHECK(port.events.empty());
+    l.subscribe(HidReport::Keyboard, false); l.subscribe(HidReport::Consumer, true);
+    hid.tap(l, port, HidReport::Keyboard, 0x4F); CHECK(port.events.empty());
+    HidLink off; FakePort none(off); hid.tap(off, none, HidReport::Consumer, hidVolumeUp); CHECK(none.events.empty());
+  }
+  { // Press fails: no release is sent, the staged value returns to released, nothing is pending.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {false};
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    CHECK(port.events == "s" && port.sent[0].bytes == volumePress && !hid.busy());
+    CHECK(port.released(HidReport::Consumer) && l.linked());
+  }
+  { // Release fails at 1008: no immediate retry, none before 1108, one retry then succeeds. No press while pending.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false, true}; port.clock = 1000;
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    CHECK(port.events == "sws" && hid.releasePending() && port.released(HidReport::Consumer));
+    port.clock = 1010; hid.tap(l, port, HidReport::Keyboard, 0x4F); hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    port.clock = 1107; hid.poll(l, port); CHECK(port.events == "sws");
+    port.clock = 1108; hid.poll(l, port);
+    CHECK(port.events == "swss" && port.sent[2].report == HidReport::Consumer && port.sent[2].bytes == volumeRelease);
+    CHECK(port.sent[2].connId == 1 && !port.foreign);
+    CHECK(!hid.busy() && port.closed.empty() && port.released(HidReport::Consumer) && l.linked());
+    hid.tap(l, port, HidReport::Keyboard, 0x4F); CHECK(port.events == "swsssws");
+  }
+  { // Release and the retry fail: disconnect, re-requested each interval until the late disconnect event.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false, false}; port.closes = false;
+    hid.tap(l, port, HidReport::Keyboard, 0x4F);
+    port.clock = 108; hid.poll(l, port);
+    CHECK(port.events == "swssd" && port.sent[2].bytes == keyRelease && port.sent[2].connId == 1 && !port.foreign);
+    CHECK(hid.busy() && !hid.releasePending());
+    port.clock = 150; hid.poll(l, port); CHECK(port.closed.size() == 1 && port.closed[0] == 1);
+    port.clock = 208; hid.poll(l, port); port.clock = 308; hid.poll(l, port); CHECK(port.events == "swssddd" && port.sent.size() == 3);
+    hid.tap(l, port, HidReport::Keyboard, 0x4F); CHECK(port.sent.size() == 3);
+    l.disconnect(1); port.clock = 408; hid.poll(l, port); CHECK(!hid.busy() && port.closed.size() == 3 && port.released(HidReport::Keyboard));
+  }
+  { // The disconnect request succeeds right away.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false, false};
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); port.clock = 108; hid.poll(l, port);
+    CHECK(port.events == "swssd" && !l.linked()); port.clock = 208; hid.poll(l, port); CHECK(!hid.busy() && port.events == "swssd");
+  }
+  { // The link drops before the retry: nothing is sent or requested, the pending release is dropped.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false};
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); CHECK(hid.releasePending());
+    l.disconnect(1); port.clock = 108; hid.poll(l, port); CHECK(!hid.busy() && port.events == "sws" && port.released(HidReport::Consumer));
+  }
+  { // A new session before the retry: nothing is resent to the new host.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false};
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); l.disconnect(1); subscribe(l);
+    port.clock = 108; hid.poll(l, port); CHECK(!hid.busy() && port.events == "sws");
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); CHECK(port.events == "swssws");
+  }
+  { // Disconnected right after the press: nothing more is sent, nothing is pending.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.dropOnWait = true;
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    CHECK(port.events == "sw" && !hid.busy() && port.released(HidReport::Consumer) && !l.linked());
+  }
+  { // Disconnected and reconnected during the wait: no release to the new host, nothing pending.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.reconnectOnWait = true;
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp);
+    CHECK(port.events == "sw" && !hid.busy() && port.released(HidReport::Consumer) && l.linked() && l.connId() == 7);
+  }
+  { // Release fails because the link dropped: nothing is pending and no disconnect is requested.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.results = {true, false}; port.dropOnSend = 2;
+    hid.tap(l, port, HidReport::Consumer, hidVolumeUp); port.clock = 108; hid.poll(l, port);
+    CHECK(port.events == "sws" && !hid.busy() && port.released(HidReport::Consumer) && !l.linked());
+  }
+  { // A requested disconnect is re-requested only after the interval, until the event arrives.
+    HidLink l; subscribe(l); FakePort port(l); HidSender hid; port.closes = false;
+    hid.disconnect(l, port); CHECK(port.events == "d" && hid.busy());
+    port.clock = 99; hid.poll(l, port); CHECK(port.events == "d");
+    port.clock = 100; hid.poll(l, port); CHECK(port.events == "dd");
+    port.clock = 199; hid.poll(l, port); port.clock = 200; hid.poll(l, port); CHECK(port.events == "ddd");
+    l.disconnect(1); port.clock = 300; hid.poll(l, port); CHECK(!hid.busy() && port.events == "ddd");
+    hid.disconnect(l, port); CHECK(!hid.busy() && port.events == "ddd");
+  }
+}
+static void testHidRemote() {
+  auto subscribe = [](HidLink& l, uint16_t id) { l.connect(id); l.subscribe(HidReport::Keyboard, true); l.subscribe(HidReport::Consumer, true); };
+  { // Normal flows.
+    HidRemote r; FakePort port(r);
+    r.poll(port, false); r.tap(port, HidReport::Consumer, hidVolumeUp); CHECK(port.events.empty()); // Never started.
+    r.poll(port, true); CHECK(port.events == "SA"); r.poll(port, true); CHECK(port.events == "SA");
+    subscribe(r.link, 1); r.tap(port, HidReport::Consumer, hidVolumeUp); CHECK(port.events == "SAsws");
+    // The peer drops while the screen is open: advertise again.
+    CHECK(r.disconnected(1)); r.poll(port, true); CHECK(port.events == "SAswsA" && !r.link.linked());
+    r.poll(port, true); CHECK(port.events == "SAswsA"); // Advertising restarts once per event.
+    // Leave: stop advertising, request a disconnect; the event comes at once.
+    subscribe(r.link, 2); r.poll(port, false); CHECK(port.events == "SAswsAad" && port.closed.back() == 2 && !r.link.linked());
+    r.tap(port, HidReport::Consumer, hidVolumeUp); r.poll(port, false); CHECK(port.events == "SAswsAad");
+    // Re-enter after the disconnect: advertise at once, without starting again.
+    r.poll(port, true); CHECK(port.events == "SAswsAadA");
+    // Leave while unlinked: nothing to close. A late event while away does not advertise.
+    r.poll(port, false); CHECK(port.events == "SAswsAadAa");
+    CHECK(!r.disconnected(2)); r.poll(port, false); CHECK(port.events == "SAswsAadAa");
+  }
+  { // Leaving while the close does not happen: re-requested while away, no advertising until its event.
+    HidRemote r; FakePort port(r); port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); r.poll(port, false); CHECK(port.events == "SAad");
+    port.clock = 99; r.poll(port, false); port.clock = 100; r.poll(port, false); port.clock = 200; r.poll(port, false);
+    CHECK(port.events == "SAaddd" && r.link.linked());
+    r.poll(port, true); CHECK(port.events == "SAaddd"); // Back on the screen: the old link is still there.
+    r.tap(port, HidReport::Keyboard, 0x4F); CHECK(port.events == "SAaddd"); // No press while its close is pending.
+    port.clock = 300; r.poll(port, true); CHECK(port.events == "SAadddd");
+    CHECK(r.disconnected(1)); r.poll(port, true); CHECK(port.events == "SAaddddA" && !r.busy());
+    subscribe(r.link, 2); r.tap(port, HidReport::Keyboard, 0x4F); CHECK(port.events == "SAaddddAsws" && port.sent[0].connId == 2);
+  }
+  { // A failed release keeps being recovered after leaving the screen.
+    HidRemote r; FakePort port(r); port.results = {true, false}; port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); r.tap(port, HidReport::Keyboard, 0x4F); CHECK(port.events == "SAsws" && r.busy());
+    r.poll(port, false); CHECK(port.events == "SAswsad"); // Leaving closes the link, which also releases the key.
+    port.clock = 108; r.poll(port, false); port.clock = 208; r.poll(port, false); CHECK(port.events == "SAswsaddd");
+    CHECK(r.disconnected(1)); port.clock = 308; r.poll(port, false); CHECK(port.events == "SAswsaddd" && !r.busy());
+  }
+  { // A failed release on the open screen: retried after 100 ms, then disconnect, until the event.
+    HidRemote r; FakePort port(r); port.results = {true, false, false}; port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); r.tap(port, HidReport::Consumer, hidVolumeUp);
+    port.clock = 107; r.poll(port, true); CHECK(port.events == "SAsws");
+    port.clock = 108; r.poll(port, true); CHECK(port.events == "SAswssd");
+    port.clock = 208; r.poll(port, true); CHECK(port.events == "SAswssdd");
+    CHECK(r.disconnected(1)); r.poll(port, true); CHECK(port.events == "SAswssddA" && !r.busy());
+  }
+  { // A stale disconnect event of another connection keeps the current link and does not advertise.
+    HidRemote r; FakePort port(r);
+    r.poll(port, true); subscribe(r.link, 2);
+    CHECK(!r.disconnected(1)); r.poll(port, true);
+    CHECK(port.events == "SA" && r.link.linked() && r.link.ready(HidReport::Keyboard) && r.link.ready(HidReport::Consumer));
+  }
+  { // A stale event while advertising does not restart advertising (the conn_id filter on its own).
+    HidRemote r; FakePort port(r); r.poll(port, true); CHECK(!r.disconnected(5)); r.poll(port, true); CHECK(port.events == "SA");
+  }
+  { // A reconnect right after the event, before poll(): no advertising next to it (the linked check on its own).
+    HidRemote r; FakePort port(r); r.poll(port, true); subscribe(r.link, 1);
+    CHECK(r.disconnected(1)); subscribe(r.link, 2); r.poll(port, true); CHECK(port.events == "SA" && r.link.connId() == 2);
+  }
+  { // A then B: A keeps its id, session and subscriptions; B is closed each interval until its event.
+    HidRemote r; FakePort port(r); port.keep = {2};
+    r.poll(port, true); subscribe(r.link, 1); const uint32_t session = r.link.session();
+    CHECK(!r.link.connect(2)); r.link.subscribe(2, HidReport::Keyboard, false); r.link.subscribe(2, HidReport::Consumer, false);
+    CHECK(r.link.connId() == 1 && r.link.session() == session && r.link.ready(HidReport::Keyboard) && r.link.ready(HidReport::Consumer));
+    r.poll(port, true); CHECK(port.events == "SAd" && port.closed.back() == 2);
+    port.clock = 99; r.poll(port, true); CHECK(port.events == "SAd");
+    port.clock = 100; r.poll(port, true); CHECK(port.events == "SAdd" && port.closed.back() == 2);
+    r.tap(port, HidReport::Consumer, hidVolumeUp); CHECK(port.sent.size() == 2 && port.sent[0].connId == 1 && !port.foreign);
+    port.keep.clear(); CHECK(!r.disconnected(2)); port.clock = 200; r.poll(port, true);
+    CHECK(port.events == "SAddsws" && r.link.connId() == 1 && r.link.ready(HidReport::Consumer)); // No close, no advertising.
+    CHECK(r.disconnected(1)); r.poll(port, true); CHECK(port.events == "SAddswsA");
+  }
+  { // A's recovery continues next to B: A's close is re-requested while B is closed too.
+    HidRemote r; FakePort port(r); port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); r.poll(port, false); CHECK(port.events == "SAad");
+    CHECK(!r.link.connect(2)); r.poll(port, false); CHECK(port.events == "SAadd" && port.closed.back() == 2);
+    port.clock = 100; r.poll(port, false); CHECK(port.events == "SAadddd" && r.link.connId() == 1 && r.busy());
+    CHECK(std::count(port.closed.begin(), port.closed.end(), 1) == 2 && std::count(port.closed.begin(), port.closed.end(), 2) == 2);
+    CHECK(!r.disconnected(2)); CHECK(r.disconnected(1)); r.poll(port, true); CHECK(port.events == "SAaddddA" && !r.busy());
+  }
+  { // Two extras at once (the SDK allows 3 links): both are closed, again until each event.
+    HidRemote r; FakePort port(r); port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); CHECK(!r.link.connect(2) && !r.link.connect(3));
+    r.poll(port, true); CHECK(port.closed == std::vector<uint16_t>({2, 3}));
+    CHECK(!r.disconnected(2)); port.clock = 100; r.poll(port, true); CHECK(port.closed == std::vector<uint16_t>({2, 3, 3}));
+    CHECK(!r.disconnected(3)); port.clock = 200; r.poll(port, true); CHECK(port.closed.size() == 3 && r.link.connId() == 1);
+  }
+  { // Extras gone right after a request: the next extra is closed at once, not at the old deadline.
+    HidRemote r; FakePort port(r); port.closes = false;
+    r.poll(port, true); subscribe(r.link, 1); CHECK(!r.link.connect(2));
+    r.poll(port, true); CHECK(port.closed == std::vector<uint16_t>({2}));
+    CHECK(!r.disconnected(2)); port.clock = 10; r.poll(port, true);
+    CHECK(!r.link.connect(4)); port.clock = 20; r.poll(port, true);
+    CHECK(port.closed == std::vector<uint16_t>({2, 4}) && r.link.connId() == 1);
+  }
+  { // A host that connects while away is closed too.
+    HidRemote r; FakePort port(r); port.closes = false;
+    r.poll(port, true); r.poll(port, false); CHECK(port.events == "SAa");
+    subscribe(r.link, 3); r.poll(port, false); CHECK(port.events == "SAad" && port.closed.back() == 3);
+  }
+}
 int main() {
-  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions(); testRemote(); testTvRemote(); testSirc();
-  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions, remote, tv remote, sirc)\n", assertions);
+  testInput(); testBaseball(); testBaseballDifficulty(); testBalloon(); testMemory(); testClock(); testClockValues(); testFlight(); testMicAndRecords(); testApp(); testPhysicalTransitions(); testRemote(); testTvRemote(); testSirc(); testCamera(); testHid(); testHidRemote();
+  std::printf("PASS: %u assertions (input, 5 games, calibration, NVS codec, app transitions, remote, tv remote, sirc, camera, hid, hid remote)\n", assertions);
 }

@@ -11,5 +11,5 @@ else
 fi
 ${CXX:-c++} "$@" -std=c++17 -Wall -Wextra -Werror -pedantic -g \
   -fsanitize=address,undefined -fno-omit-frame-pointer -Iinclude \
-  src/games/model.cpp src/app/app.cpp src/app/sirc.cpp test/test_logic.cpp -o build/test_logic
+  src/games/model.cpp src/app/app.cpp src/app/sirc.cpp src/app/hid_report.cpp test/test_logic.cpp -o build/test_logic
 ./build/test_logic

@@ -17,6 +17,9 @@ os.chdir(ROOT)
 OUT = ROOT / "build" / "preview-objects"
 OUT.mkdir(parents=True, exist_ok=True)
 (ROOT / "build" / "previews").mkdir(parents=True, exist_ok=True)
+# Frame numbers shift when screens are added; stale files would break the sheet indices.
+for stale in (ROOT / "build" / "previews").glob("*.ppm"):
+    stale.unlink()
 sdk = Path("/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
 flags = ["-O1", "-ffunction-sections", "-fdata-sections", "-Iinclude", "-Ilib/M5GFX/src", "-DLGFX_SDL", "-DMINIGAMES_RENDER_QA"]
 flags += shlex.split(subprocess.check_output(["pkg-config", "--cflags", "sdl2"], text=True))
@@ -43,8 +46,15 @@ subprocess.run(["build/render_preview"], check=True)
 # A compact contact sheet from the real production renderer, without an image
 # processing dependency. Individual full-size PPM files remain in build/previews.
 files = sorted((ROOT / "build" / "previews").glob("*.ppm"))
-chosen = [files[n] for n in [0, 1, 2, 3, 6, 12, 15, 18, 21, 26, 40, 44]]
-width, height = 720, 4 * 158
+# Picked by frame name and its occurrence, so adding frames does not shift the sheet.
+by_name = {}
+for path in files:
+    by_name.setdefault(path.stem.split("-", 1)[1], []).append(path)
+chosen = [by_name[name][n] for name, n in [
+    ("menu", 0), ("menu", 1), ("menu", 2), ("menu", 3), ("menu", 6), ("result", 0),
+    ("instructions", 1), ("result", 1), ("instructions", 2), ("result", 2), ("memory", 0), ("memory", 2),
+    ("menu", 7), ("camera-connected", 0), ("camera-shutter", 0)]]
+width, height = 720, 5 * 158
 pixels = bytearray([245] * (width * height * 3))
 for i, path in enumerate(chosen):
     data = path.read_bytes().split(b"\n", 3)[3]

@@ -79,13 +79,10 @@ void Hardware::sound(Sound sound, bool enabled, bool muted) {
   }
 }
 void Hardware::pollBle(bool wanted, RemoteKey key) {
-  // Bluedroid starts lazily on first entry and stays resident afterwards.
-  if (wanted && !ble.active_) ble.begin();
-  else if (!wanted && ble.active_) ble.end();
-  if (!wanted) return;
-  ble.poll();
+  ble.poll(wanted);
   if (key == RemoteKey::Next) ble.tap(BleKeyboard::rightArrow);
   else if (key == RemoteKey::Prev) ble.tap(BleKeyboard::leftArrow);
+  else if (key == RemoteKey::Shutter) ble.tapVolumeUp();
 }
 void Hardware::pollIr(bool wanted, TvKey key) {
   if (wanted) ir.begin();

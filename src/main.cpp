@@ -24,6 +24,7 @@ void loop() {
   const auto mic = hardware.pollMic(hardware.boardReady && app.wantsMic(), now);
   const auto previousScreen = app.screen;
   app.remote.linked = hardware.ble.linked(); app.remote.ready = hardware.ble.ready();
+  app.remote.shutterReady = hardware.ble.volumeReady();
   app.tv.sending = hardware.ir.busy();
   if (hardware.boardReady) app.update(now, input, mic);
   if (previousScreen != app.screen) M5.Speaker.stop();
